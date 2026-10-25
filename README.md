@@ -6,7 +6,7 @@ A mobile-friendly Streamlit app for guests to take a photo, upload it to one sha
 
 1. A guest scans the QR code and opens the deployed HTTPS app.
 2. They enter the shared guest passcode.
-3. The page requests camera access and starts a rear-camera preview when the browser grants permission.
+3. The page requests camera access and starts a rear-camera preview when the browser grants permission. Guests can switch to the front camera and expand the preview to full screen.
 4. They tap **Take a photo**. The photo uploads automatically and appears in the shared album.
 5. The couple shares the guest passcode separately from the QR code.
 

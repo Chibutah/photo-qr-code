@@ -26,12 +26,20 @@ CAMERA_HTML = """
   <div class="video-wrap">
     <video class="camera-video" autoplay playsinline muted></video>
     <div class="camera-placeholder">Your camera preview will appear here.</div>
+    <div class="camera-top-controls">
+      <button class="camera-control fullscreen-button" type="button" aria-label="Enter full screen" disabled>
+        Enter full screen
+      </button>
+      <button class="camera-control switch-button" type="button" aria-label="Switch to front camera" disabled>
+        Switch to front camera
+      </button>
+    </div>
+    <p class="camera-status" role="status">Requesting camera access…</p>
+    <button class="capture-button" type="button" disabled>
+      <span class="capture-dot"></span>
+      Take a photo
+    </button>
   </div>
-  <p class="camera-status" role="status">Requesting camera access…</p>
-  <button class="capture-button" type="button" disabled>
-    <span class="capture-dot"></span>
-    Take a photo
-  </button>
 </section>
 """
 CAMERA_CSS = """
@@ -48,11 +56,35 @@ CAMERA_CSS = """
   border-radius: 1rem;
   background: var(--st-secondary-background-color);
 }
+.video-wrap.is-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  max-width: none;
+  aspect-ratio: auto;
+  border-radius: 0;
+}
+.video-wrap:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  max-width: none;
+  aspect-ratio: auto;
+  border-radius: 0;
+  background: #000;
+}
 .camera-video {
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: none;
+}
+.video-wrap.is-fullscreen .camera-video,
+.video-wrap:fullscreen .camera-video {
+  display: block;
 }
 .camera-placeholder {
   position: absolute;
@@ -63,18 +95,54 @@ CAMERA_CSS = """
   text-align: center;
   opacity: 0.72;
 }
+.camera-top-controls {
+  position: absolute;
+  z-index: 1;
+  top: 0.75rem;
+  left: 0.75rem;
+  right: 0.75rem;
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.camera-control {
+  min-height: 2.75rem;
+  padding: 0.5rem 0.85rem;
+  border: 1px solid rgb(255 255 255 / 25%);
+  border-radius: 999px;
+  background: rgb(20 16 14 / 70%);
+  color: white;
+  font: inherit;
+  cursor: pointer;
+}
+.camera-control:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
 .camera-status {
+  position: absolute;
+  z-index: 1;
+  right: 0.75rem;
+  bottom: 4.75rem;
+  left: 0.75rem;
   min-height: 1.25rem;
   margin: 0;
+  color: white;
+  text-align: center;
   font-size: 0.9rem;
-  opacity: 0.8;
+  text-shadow: 0 1px 4px #000;
 }
 .capture-button {
+  position: absolute;
+  z-index: 1;
+  right: 0.75rem;
+  bottom: 0.75rem;
+  left: 0.75rem;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 0.65rem;
-  width: 100%;
+  width: calc(100% - 1.5rem);
   min-height: 3.25rem;
   border: 0;
   border-radius: 999px;
@@ -115,33 +183,97 @@ export default function (component) {
 
   let stream;
   let disposed = false;
+  let facingMode = "environment";
+  const videoWrap = parentElement.querySelector(".video-wrap");
+  const switchButton = parentElement.querySelector(".switch-button");
+  const fullscreenButton = parentElement.querySelector(".fullscreen-button");
+  if (!videoWrap || !switchButton || !fullscreenButton) return;
 
-  async function startCamera() {
+  async function startCamera(mode, exact = false) {
     if (!navigator.mediaDevices?.getUserMedia) {
       status.textContent = "Camera access needs a secure HTTPS connection.";
       return;
     }
     try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: "environment" } },
+      const nextStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: exact ? { exact: mode } : { ideal: mode } },
         audio: false,
       });
       if (disposed) {
-        stream.getTracks().forEach((track) => track.stop());
+        nextStream.getTracks().forEach((track) => track.stop());
         return;
       }
+      stream?.getTracks().forEach((track) => track.stop());
+      stream = nextStream;
+      facingMode = mode;
       video.srcObject = stream;
       await video.play();
       video.style.display = "block";
       placeholder.style.display = "none";
       button.disabled = false;
+      switchButton.disabled = false;
+      fullscreenButton.disabled = false;
+      switchButton.textContent = facingMode === "environment"
+        ? "Switch to front camera"
+        : "Switch to back camera";
+      switchButton.setAttribute("aria-label", switchButton.textContent);
       status.textContent = "Ready when you are.";
     } catch (error) {
       status.textContent = error?.name === "NotAllowedError"
         ? "Allow camera access in your browser to take a photo."
-        : "We couldn't start the camera. Check your browser permissions and try again.";
+        : error?.name === "OverconstrainedError" || error?.name === "NotFoundError"
+          ? "That camera isn't available on this device."
+          : "We couldn't start the camera. Check your browser permissions and try again.";
+      if (!stream) button.disabled = true;
     }
   }
+
+  switchButton.addEventListener("click", async () => {
+    const previousMode = facingMode;
+    const nextMode = previousMode === "environment" ? "user" : "environment";
+    switchButton.disabled = true;
+    status.textContent = "Switching camera…";
+    await startCamera(nextMode, true);
+    if (facingMode === previousMode) {
+      await startCamera(previousMode);
+      switchButton.disabled = false;
+      status.textContent = "That camera isn't available on this device.";
+    }
+  });
+
+  function updateFullscreenButton() {
+    const isFullscreen = document.fullscreenElement === videoWrap
+      || videoWrap.classList.contains("is-fullscreen");
+    fullscreenButton.textContent = isFullscreen ? "Exit full screen" : "Enter full screen";
+    fullscreenButton.setAttribute(
+      "aria-label",
+      isFullscreen ? "Exit full screen" : "Enter full screen",
+    );
+  }
+
+  fullscreenButton.addEventListener("click", async () => {
+    try {
+      if (document.fullscreenElement === videoWrap) {
+        await document.exitFullscreen();
+        videoWrap.classList.remove("is-fullscreen");
+      } else if (videoWrap.classList.contains("is-fullscreen")) {
+        videoWrap.classList.remove("is-fullscreen");
+      } else if (videoWrap.requestFullscreen) {
+        await videoWrap.requestFullscreen();
+      } else {
+        videoWrap.classList.add("is-fullscreen");
+      }
+      updateFullscreenButton();
+    } catch (error) {
+      status.textContent = "Full screen isn't available in this browser.";
+    }
+  });
+
+  const handleFullscreenChange = () => {
+    if (!document.fullscreenElement) videoWrap.classList.remove("is-fullscreen");
+    updateFullscreenButton();
+  };
+  document.addEventListener("fullscreenchange", handleFullscreenChange);
 
   button.addEventListener("click", () => {
     if (!video.videoWidth || !video.videoHeight) {
@@ -160,10 +292,11 @@ export default function (component) {
   const cleanup = () => {
     disposed = true;
     stream?.getTracks().forEach((track) => track.stop());
+    document.removeEventListener("fullscreenchange", handleFullscreenChange);
     instances.delete(parentElement);
   };
   instances.set(parentElement, cleanup);
-  startCamera();
+  startCamera(facingMode);
   return cleanup;
 }
 """
